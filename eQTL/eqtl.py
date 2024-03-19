@@ -4,6 +4,10 @@ from pybedtools import BedTool
 import glob
 import os
 import gzip
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('target_path')
 
 def split(file):
     '''
@@ -30,7 +34,7 @@ def split(file):
     for output_file in output_files.values():
         output_file.close()
 
-def trim(file):
+def trim(file, output_file):
     '''
         removes undesirable columns from input file 
     '''
@@ -39,8 +43,7 @@ def trim(file):
     new_df['tissue'] = ['Colon_Sigmoid'] * len(new_df)
     new_df.rename(columns={'variant_id': 'variant', 'gene_id': 'gene'}, inplace=True)
     new_df.index = np.arange(1, len(new_df) + 1)
-    file = os.path.basename(file)
-    new_df.to_csv(os.path.join(file.split('.')[0], 'newdata' + file), sep='\t', index=False)
+    new_df.to_csv(output_file, sep='\t', index=False)
 
 def eqtl_process(input_file, output_file):
     '''
@@ -88,7 +91,7 @@ def eliminateOverlap(input_file, output_file, overlap_file, unmatched_file):
         Eliminate any eQTL that are found in exons of their own genes
     '''
     hash = {}
-    with open('exons_genes.txt', 'r') as exon_file:
+    with open('eQTL/exons_genes.txt', 'r') as exon_file:
         for line in exon_file:
             line_split = line.strip().split('\t')
             chr = line_split[0]
@@ -201,59 +204,77 @@ def concatenate(input_files, output_file):
             outfile.write(infile.read())
             infile.close()
 
-panther_mapping = {}
-with open('pantherGeneList.txt', 'r') as pantherGene_file:
-    for line in pantherGene_file:
-        line_split = line.strip().split('\t')
-        panth = line_split[0]
-        ensg = line_split[1]
-        panther_mapping[ensg] = panth
 
-tissues = {}
-with open('tissuetable_10092018.txt', 'r') as tissue_file:
-    for line in tissue_file:
-        line_split = line.strip().split('\t')
-        tissueID = line_split[0]
-        tissue = line_split[1]
-        tissue = tissue.replace(' ', '_')
-        tissues[tissue] = tissueID
+if __name__ == "__main__":
+    args = parser.parse_args()
+    target_path = args.target_path
+    os.makedirs(target_path, exist_ok=True)
 
-gene_pair_gz_files = glob.glob(os.path.join('GTEx_Analysis_v7_eQTL', '*variant_gene_pairs.txt.gz'))
-links_files = []
-linksnum_files = []
+    panther_mapping = {}
+    with open('eQTL/pantherGeneList.txt', 'r') as pantherGene_file:
+        for line in pantherGene_file:
+            line_split = line.strip().split('\t')
+            panth = line_split[0]
+            ensg = line_split[1]
+            panther_mapping[ensg] = panth
 
-for gene_pair_gz_file in gene_pair_gz_files:
+    tissues = {}
+    with open('eQTL/tissuetable_10092018.txt', 'r') as tissue_file:
+        for line in tissue_file:
+            line_split = line.strip().split('\t')
+            tissueID = line_split[0]
+            tissue = line_split[1]
+            tissue = tissue.replace(' ', '_')
+            tissues[tissue] = tissueID
 
-    # get tissue name from gz file and make a folder for it
-    folder = os.path.basename(gene_pair_gz_file).split('.')[0]
-    os.makedirs(folder)
-    gene_pair_file = os.path.basename(gene_pair_gz_file).strip('.gz')
+    gene_pair_gz_files = glob.glob(os.path.join('eQTL', 'GTEx_Analysis_v7_eQTL', '*variant_gene_pairs.txt.gz'))
+    links_files = []
+    linksnum_files = []
 
-    # extract the txt file from the zip file and place it in the created folder
-    with gzip.open(gene_pair_gz_file, 'rb') as gz_file:
-        content = gz_file.read()
-    with open(os.path.join(folder, gene_pair_file), 'wb') as extracted_file:
-        extracted_file.write(content)
+    for gene_pair_gz_file in gene_pair_gz_files:
 
-    # split(os.path.join(folder, gene_pair_file))
+        # get tissue name from gz file and make a folder for it
+        folder = os.path.basename(gene_pair_gz_file).split('.')[0]
+        folder = os.path.join(target_path, folder)
+        os.makedirs(folder, exist_ok=True)
+        gene_pair_file = os.path.basename(gene_pair_gz_file).strip('.gz')
 
-    trim(os.path.join(folder, gene_pair_file))
+        # extract the txt file from the zip file and place it in the created folder
+        with gzip.open(gene_pair_gz_file, 'rb') as gz_file:
+            content = gz_file.read()
+        with open(os.path.join(folder, gene_pair_file), 'wb') as extracted_file:
+            extracted_file.write(content)
 
-    tissue = gene_pair_file.split('.')[0]
+        # split(os.path.join(folder, gene_pair_file))
 
-    eqtl_process(os.path.join(folder, 'newdata' + gene_pair_file), os.path.join(folder, tissue + '_eqtl'))
+        trim_infile = os.path.join(folder, gene_pair_file)
+        trim_outfile = os.path.join(folder, 'newdata' + os.path.basename(trim_infile))
+        trim(trim_infile, trim_outfile)
 
-    eliminateOverlap(os.path.join(folder, tissue + '_eqtl'), os.path.join(folder, tissue + '_eqtl2'), os.path.join(folder, 'overlaps'), os.path.join(folder, 'unmatched'))
+        tissue = gene_pair_file.split('.')[0]
+        tissue_out = os.path.join(folder, tissue + '_eqtl')
+        eqtl_process(trim_outfile, tissue_out)
 
-    bedtoolIntersect('CREbedDBenhancers_10092018', os.path.join(folder, tissue + '_eqtl2'), os.path.join(folder, tissue + '_intersect'))
+        eqtl2_outfile = os.path.join(folder, tissue + '_eqtl2')
+        overlaps_outfile = os.path.join(folder, 'overlaps')
+        unmatched_outfile = os.path.join(folder, 'unmatched')
+        eliminateOverlap(tissue_out, eqtl2_outfile, overlaps_outfile, unmatched_outfile)
 
-    eqtllinks(os.path.join(folder, tissue + '_intersect'), os.path.join(folder, 'links_' + tissue + '_eqtl'))
+        intersect_outfile = os.path.join(folder, tissue + '_intersect')
+        crebedDBenhancers_file = os.path.join('eQTL', 'CREbedDBenhancers_10092018')
+        bedtoolIntersect(crebedDBenhancers_file, eqtl2_outfile, intersect_outfile)
 
-    links_files.append(os.path.join(folder, 'links_' + tissue + '_eqtl'))
+        links_outfile = os.path.join(folder, 'links_' + tissue + '_eqtl')
+        eqtllinks(intersect_outfile, links_outfile)
 
-    linksDB(os.path.join(folder, 'links_' + tissue + '_eqtl'), os.path.join(folder, 'linksnum_' + tissue + '_eqtl'))
+        links_files.append(links_outfile)
 
-    linksnum_files.append(os.path.join(folder, 'linksnum_' + tissue + '_eqtl'))
+        linksnum_outfile = os.path.join(folder, 'linksnum_' + tissue + '_eqtl')
+        linksDB(links_outfile, linksnum_outfile)
 
-concatenate(links_files, 'linksDBeqtl')
-concatenate(linksnum_files, 'linksDBnumeqtl')
+        linksnum_files.append(linksnum_outfile)
+
+    linksDBeqtl_file = os.path.join(target_path, 'linksDBeqtl')
+    concatenate(links_files, 'linksDBeqtl')
+    linksDBnumeqtl_file = os.path.join(target_path, 'linksDBnumeqtl')
+    concatenate(linksnum_files, 'linksDBnumeqtl')

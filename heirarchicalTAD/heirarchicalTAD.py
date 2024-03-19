@@ -3,6 +3,10 @@ from pybedtools import BedTool
 import os
 import shutil
 import glob
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('target_path')
 
 
 def idmapping_processing():
@@ -137,52 +141,54 @@ def concatenate(input_files, output_file):
             outfile.write(infile.read())
             infile.close()
 
-panth = {}
-with open('pantherGeneList.txt', 'r') as panth_mapping:
-    for line in panth_mapping:
-        line_split = line.strip().split()
-        longID = line_split[0]
-        ensg = line_split[0]
-        longID_split = longID.split('|')
-        HGNC = longID_split[1]
-        uniprotkb = longID_split[2].split('=')[1]
-        panth[HGNC] = longID
-        panth[uniprotkb] = longID
-        panth[ensg] = longID
 
-tissues = {}
-with open('tissuetable_10092018.txt', 'r') as tissue_file:
-    for line in tissue_file:
-        line_split = line.strip().split('\t')
-        tissueID = line_split[0]
-        tissue = line_split[1]
-        tissue = tissue.replace(' ', '_')
-        tissues[tissue] = tissueID
+if __name__ == "__main__":
+    panth = {}
+    with open('pantherGeneList.txt', 'r') as panth_mapping:
+        for line in panth_mapping:
+            line_split = line.strip().split()
+            longID = line_split[0]
+            ensg = line_split[1]
+            longID_split = longID.split('|')
+            HGNC = longID_split[1]
+            uniprotkb = longID_split[2].split('=')[1]
+            panth[HGNC] = longID
+            panth[uniprotkb] = longID
+            panth[ensg] = longID
 
-idmapping_processing()
+    tissues = {}
+    with open('tissuetable_10092018.txt', 'r') as tissue_file:
+        for line in tissue_file:
+            line_split = line.strip().split('\t')
+            tissueID = line_split[0]
+            tissue = line_split[1]
+            tissue = tissue.replace(' ', '_')
+            tissues[tissue] = tissueID
 
-bed_files = glob.glob(os.path.join('data', '*'))
-db_files = []
+    idmapping_processing()
 
-for bed_file in bed_files:
-    bed_file_split = bed_file.split('.')
+    bed_files = glob.glob(os.path.join('data', '*'))
+    db_files = []
 
-    folder = os.path.basename(bed_file_split[0])
-    if '_' in bed_file_split[0]:
-        folder = folder.split('_')[1]
+    for bed_file in bed_files:
+        bed_file_split = bed_file.split('.')
 
-    tissue = os.path.basename(folder)
-    file = os.path.basename(bed_file)
-    if tissue in tissues:
-        os.mkdir(folder)
-        shutil.copy(bed_file, folder)
+        folder = os.path.basename(bed_file_split[0])
+        if '_' in bed_file_split[0]:
+            folder = folder.split('_')[1]
 
-        nonegvalues(os.path.join(folder, file), os.path.join(folder, 'nn_' + file), os.path.join(folder, 'out')) 
-        file_name = os.path.splitext(file)[0]
-        bedtoolIntersect('CREbedDBenhancers_10092018', os.path.join(folder, 'nn_' + file), os.path.join(folder, 'nn_' + file_name + '_intersect'))
-        HGNC2PANTH(os.path.join(folder, 'nn_' + file_name + '_intersect'), os.path.join(folder, file_name + '_out'), 'unmatched', tissue)
-        reformat(os.path.join(folder, file_name + '_out'), os.path.join(folder, 'intTADlinks_' + file_name))
-        tissuesReplace(os.path.join(folder, 'intTADlinks_' + file_name), os.path.join(folder,  file_name + '_DB'))
-        db_files.append(os.path.join(folder,  file_name + '_DB'))
+        tissue = os.path.basename(folder)
+        file = os.path.basename(bed_file)
+        if tissue in tissues:
+            os.mkdir(folder)
+            shutil.copy(bed_file, folder)
 
-concatenate(db_files, 'PSYCHIClinksDB')
+            nonegvalues(os.path.join(folder, file), os.path.join(folder, 'nn_' + file), os.path.join(folder, 'out'))
+            file_name = os.path.splitext(file)[0]
+            bedtoolIntersect('CREbedDBenhancers_10092018', os.path.join(folder, 'nn_' + file), os.path.join(folder, 'nn_' + file_name + '_intersect'))
+            HGNC2PANTH(os.path.join(folder, 'nn_' + file_name + '_intersect'), os.path.join(folder, file_name + '_out'), 'unmatched', tissue)
+            reformat(os.path.join(folder, file_name + '_out'), os.path.join(folder, 'intTADlinks_' + file_name))
+            tissuesReplace(os.path.join(folder, 'intTADlinks_' + file_name), os.path.join(folder,  file_name + '_DB'))
+            db_files.append(os.path.join(folder,  file_name + '_DB'))
+
+    concatenate(db_files, 'PSYCHIClinksDB')
